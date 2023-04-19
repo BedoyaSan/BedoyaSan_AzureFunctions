@@ -74,13 +74,14 @@ namespace BedoyaSan_AzureFunctions
                 itemEntity.RowKey = "visitorcount";
                 itemEntity.Name = "Count";
                 itemEntity.Value = 1;
+
+                await tableClient.UpsertEntityAsync(itemEntity);
             }
             else if (newVisit)
             {
                 itemEntity.Value += 1;
+                await tableClient.UpsertEntityAsync(itemEntity);
             }
-
-            await tableClient.UpsertEntityAsync(itemEntity);
 
             ResponseValue response = new ResponseValue(newVisit ? "Success, first time" : "Success, recurrent visitor", itemEntity.Value);
 
