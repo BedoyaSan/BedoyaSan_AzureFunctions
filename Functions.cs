@@ -10,6 +10,7 @@ using BedoyaSan_AzureFunctions.Models;
 using System.Linq;
 using System.Net;
 using Microsoft.Extensions.Primitives;
+using Azure;
 
 namespace BedoyaSan_AzureFunctions
 {
@@ -20,11 +21,11 @@ namespace BedoyaSan_AzureFunctions
         /// It stores the Public IP Address obtained from the request headers, to check for only unique visitor counts.
         /// If the table or entity does not exist, it will be created upon first invocation.
         /// </summary>
-        /// <param name="req"></param>
-        /// <param name="log"></param>
-        /// <returns></returns>
+        /// <param name = "req" ></ param >
+        /// < param name= "log" ></ param >
+        /// < returns ></ returns >
         [FunctionName("visitorcount")]
-        public static async Task<IActionResult> Run(
+        public static async Task<IActionResult> VisitorCount(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req,
             ILogger log)
         {
@@ -47,13 +48,16 @@ namespace BedoyaSan_AzureFunctions
 
                 if (visitor == null)
                 {
-                    newVisit = false;
                     visitor = new TableEntity();
                     visitor.PartitionKey = "visitorinfo";
                     visitor.RowKey = ipAddress.ToString();
                     visitor.Timestamp = DateTime.UtcNow.AddHours(-5);
 
                     await tableClient.UpsertEntityAsync(visitor);
+                }
+                else
+                {
+                    newVisit = false;
                 }
             }
             else
@@ -81,6 +85,30 @@ namespace BedoyaSan_AzureFunctions
             ResponseValue response = new ResponseValue(newVisit ? "Success, first time" : "Success, recurrent visitor", itemEntity.Value);
 
             return new OkObjectResult(response);
+        }
+
+        /// <summary>
+        /// This function will run every monday, and will delete the visitor registers from the table visitorinfo
+        /// </summary>
+        /// <param name="timer"></param>
+        /// <param name="log"></param>
+        [FunctionName("visitorcleaner")]
+        public static void VisitorCleaner(
+            [TimerTrigger("0 0 * * mon")] TimerInfo timer,
+            ILogger log)
+        {
+            TableServiceClient tableServiceClient = new TableServiceClient(Environment.GetEnvironmentVariable("CosmosDBConnectionString"));
+            TableClient tableClient = tableServiceClient.GetTableClient("bedoyasan");
+            tableClient.CreateIfNotExists();
+
+            DateTime currentDate = DateTime.UtcNow.AddHours(-5);
+
+            Pageable<ValueItem> visitorInfo = tableClient.Query<ValueItem>(item => item.PartitionKey.Equals("visitorinfo"));
+
+            foreach (ValueItem item in visitorInfo)
+            {
+                tableClient.DeleteEntity("visitorinfo", item.RowKey);
+            }
         }
     }
 }
