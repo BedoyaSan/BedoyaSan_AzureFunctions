@@ -1,18 +1,15 @@
 using System;
-using System.IO;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 using Azure.Data.Tables;
-using Azure.Data.Tables.Models;
-using Azure;
-using System.Collections.Concurrent;
 using BedoyaSan_AzureFunctions.Models;
 using System.Linq;
+using System.Net;
+using Microsoft.Extensions.Primitives;
 
 namespace BedoyaSan_AzureFunctions
 {
@@ -20,6 +17,7 @@ namespace BedoyaSan_AzureFunctions
     {
         /// <summary>
         /// This function keeps track of the number of times it has been invoked, which can be used to track the number of visitors to a website.
+        /// It stores the Public IP Address obtained from the request headers, to check for only unique visitor counts.
         /// If the table or entity does not exist, it will be created upon first invocation.
         /// </summary>
         /// <param name="req"></param>
@@ -32,12 +30,40 @@ namespace BedoyaSan_AzureFunctions
         {
             TableServiceClient tableServiceClient = new TableServiceClient(Environment.GetEnvironmentVariable("CosmosDBConnectionString"));
             TableClient tableClient = tableServiceClient.GetTableClient("bedoyasan");
-
             await tableClient.CreateIfNotExistsAsync();
+
+            bool newVisit = true;
+
+            IPAddress ipAddress = null;
+            if (req.Headers.TryGetValue("X-Forwarded-For", out StringValues values))
+            {
+                var ipn = values.FirstOrDefault().Split(new char[] { ',' }).FirstOrDefault().Split(new char[] { ':' }).FirstOrDefault();
+                IPAddress.TryParse(ipn, out ipAddress);
+            }
+
+            if (ipAddress != null)
+            {
+                TableEntity visitor = tableClient.Query<TableEntity>(item => item.PartitionKey.Equals("visitorinfo") && item.RowKey.Equals(ipAddress.ToString())).FirstOrDefault();
+
+                if (visitor == null)
+                {
+                    newVisit = false;
+                    visitor = new TableEntity();
+                    visitor.PartitionKey = "visitorinfo";
+                    visitor.RowKey = ipAddress.ToString();
+                    visitor.Timestamp = DateTime.UtcNow.AddHours(-5);
+
+                    await tableClient.UpsertEntityAsync(visitor);
+                }
+            }
+            else
+            {
+                log.LogInformation("There was no ipAddress from the headers, counting as a new visitor");
+            }
 
             ValueItem itemEntity = tableClient.Query<ValueItem>(item => item.PartitionKey.Equals("generaldata") && item.RowKey.Equals("visitorcount")).FirstOrDefault();
 
-            if(itemEntity == null)
+            if (itemEntity == null)
             {
                 itemEntity = new ValueItem();
                 itemEntity.PartitionKey = "generaldata";
@@ -45,14 +71,14 @@ namespace BedoyaSan_AzureFunctions
                 itemEntity.Name = "Count";
                 itemEntity.Value = 1;
             }
-            else
+            else if (newVisit)
             {
                 itemEntity.Value += 1;
             }
 
             await tableClient.UpsertEntityAsync(itemEntity);
 
-            ResponseValue response = new ResponseValue("Success", itemEntity.Value);
+            ResponseValue response = new ResponseValue(newVisit ? "Success, first time" : "Success, recurrent visitor", itemEntity.Value);
 
             return new OkObjectResult(response);
         }
