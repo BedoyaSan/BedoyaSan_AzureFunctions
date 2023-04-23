@@ -102,8 +102,6 @@ namespace BedoyaSan_AzureFunctions
             TableClient tableClient = tableServiceClient.GetTableClient("bedoyasan");
             tableClient.CreateIfNotExists();
 
-            DateTime currentDate = DateTime.UtcNow.AddHours(-5);
-
             Pageable<ValueItem> visitorInfo = tableClient.Query<ValueItem>(item => item.PartitionKey.Equals("visitorinfo"));
 
             foreach (ValueItem item in visitorInfo)
